@@ -1,0 +1,6 @@
+{
+  "name": "L'Atelier Alphabette",
+  "description": "Espace de création bienveillant et accessible par Intelligence Artificielle pour les seniors : souvenirs, contes, poésie, peinture, musique et jeux sans jargon technique.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

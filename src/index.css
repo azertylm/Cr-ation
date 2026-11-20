@@ -1,0 +1,60 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --base-font-size: 20px;
+    font-size: var(--base-font-size);
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  body {
+    background-color: #FFFFFF;
+    color: #111827;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .dark body {
+    background-color: #090D16;
+    color: #FFFFFF;
+  }
+
+  h1, h2, .font-serif-title {
+    font-family: 'Fraunces', Georgia, serif;
+    text-wrap: balance;
+  }
+
+  /* High visibility focus ring for WCAG AAA senior accessibility */
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
+    outline: 4px solid #1D4ED8 !important;
+    outline-offset: 3px !important;
+  }
+
+  .dark button:focus-visible,
+  .dark a:focus-visible,
+  .dark input:focus-visible,
+  .dark textarea:focus-visible {
+    outline: 4px solid #FACC15 !important;
+    outline-offset: 3px !important;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    font-size: 16pt !important;
+  }
+  .print-card {
+    box-shadow: none !important;
+    border: 2px solid #000000 !important;
+    break-inside: avoid;
+  }
+}
