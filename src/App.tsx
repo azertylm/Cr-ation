@@ -4,6 +4,7 @@ import {
   CategoryId,
   WorkshopDefinition,
   SavedCreation,
+  ChoiceOption,
 } from './data/workshops';
 import {
   FONT_SCALE_VALUES,
@@ -15,9 +16,16 @@ import {
   generateLocalCreationFallback,
   generateLocalQuizFallback,
   generateLocalInteractiveFallback,
+  generateLocalStepSuggestionsFallback,
+  HOME_QUICK_PROPOSITIONS,
+  HomeQuickProposition,
 } from './utils/atelierLogic';
+import {
+  alphabetteAudio,
+  AlphabetteAudioState,
+  buildReadableCreationText,
+} from './utils/alphabetteAudio';
 import { TopBarAlphabette } from './components/TopBarAlphabette';
-import { BottomBarAlphabette } from './components/BottomBarAlphabette';
 import { ResultView } from './components/ResultView';
 import { SavedGalleryView } from './components/SavedGalleryView';
 import {
@@ -26,6 +34,11 @@ import {
   ArrowRight,
   Wand2,
   HeartHandshake,
+  FolderHeart,
+  Sparkles,
+  RefreshCw,
+  Loader2,
+  Check,
 } from 'lucide-react';
 
 type ScreenState =
@@ -101,42 +114,40 @@ export default function App() {
     step3: '',
   });
 
-  // Voice & Audio states
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  // Unified Alphabette Audio & Dictation states
+  const [audioState, setAudioState] = useState<AlphabetteAudioState>(() =>
+    alphabetteAudio.getState()
+  );
+  const isSpeaking = audioState.status === 'playing';
+  const isAudioLoading = audioState.status === 'loading';
+  const speakingTargetId = audioState.targetId;
+
   const [isListening, setIsListening] = useState(false);
   const [voiceBannerMessage, setVoiceBannerMessage] = useState<string | null>(null);
   const [isLoadingAdjustment, setIsLoadingAdjustment] = useState(false);
-  const [hideBarsOnScroll, setHideBarsOnScroll] = useState(false);
+
+  // Rich Propositions states
+  const [homePropBatchIndex, setHomePropBatchIndex] = useState(0);
+  const [extraStepOptions, setExtraStepOptions] = useState<Record<string, ChoiceOption[]>>({});
+  const [isLoadingStepSuggestions, setIsLoadingStepSuggestions] = useState(false);
+  const [isLoadingMoreInteractiveChoices, setIsLoadingMoreInteractiveChoices] = useState(false);
+  const [customStepIdea, setCustomStepIdea] = useState('');
 
   const recognitionRef = useRef<unknown>(null);
-  const lastScrollYRef = useRef<number>(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
-  // Auto-hide top and bottom bars on scroll down so the user gets full reading visibility
   useEffect(() => {
-    const handleScroll = () => {
-      const currentY = window.scrollY;
-      const delta = currentY - lastScrollYRef.current;
-
-      if (currentY <= 30) {
-        setHideBarsOnScroll(false);
-      } else if (delta > 10) {
-        // Scrolling down -> hide both bars for full visibility
-        setHideBarsOnScroll(true);
-      } else if (delta < -12) {
-        // Scrolling back up -> reveal bars
-        setHideBarsOnScroll(false);
-      }
-
-      lastScrollYRef.current = currentY;
+    const unsubscribe = alphabetteAudio.subscribe(setAudioState);
+    return () => {
+      unsubscribe();
+      alphabetteAudio.stop();
     };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Sync font size CSS variable
+  // Sync font size CSS variable (16px base, 20px in BIG mode)
   useEffect(() => {
-    const px = FONT_SCALE_VALUES[fontScaleIndex] || 20;
+    const px = FONT_SCALE_VALUES[fontScaleIndex] || 16;
     document.documentElement.style.setProperty('--base-font-size', `${px}px`);
     localStorage.setItem(STORAGE_KEY_FONT_INDEX, String(fontScaleIndex));
   }, [fontScaleIndex]);
@@ -163,7 +174,6 @@ export default function App() {
   // Navigation helpers
   const navigateTo = (next: ScreenState) => {
     stopSpeaking();
-    setHideBarsOnScroll(false);
     setHistoryStack((prev) => [...prev, screen]);
     setScreen(next);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -171,7 +181,6 @@ export default function App() {
 
   const handleGoBack = () => {
     stopSpeaking();
-    setHideBarsOnScroll(false);
     if (historyStack.length === 0) {
       setScreen({ type: 'home' });
       return;
@@ -184,45 +193,23 @@ export default function App() {
 
   const handleGoHome = () => {
     stopSpeaking();
-    setHideBarsOnScroll(false);
     setHistoryStack([]);
     setScreen({ type: 'home' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Speech Synthesis (Web Speech API)
+  // Unified Alphabette Audio Playback (Google Gemini TTS across all screens)
   const stopSpeaking = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    setIsSpeaking(false);
+    alphabetteAudio.stop();
   };
 
-  const speakText = (text: string) => {
-    if (!('speechSynthesis' in window)) {
-      setVoiceBannerMessage('La lecture vocale n’est pas disponible sur ce navigateur.');
-      return;
-    }
-
-    if (isSpeaking) {
-      stopSpeaking();
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'fr-FR';
-    utterance.rate = 0.92; // Slightly slower, clear and warm pace for seniors
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    setIsSpeaking(true);
-    window.speechSynthesis.speak(utterance);
+  const toggleSpeakText = (text: string, targetId = 'global') => {
+    alphabetteAudio.toggle(text, targetId);
   };
 
   const getCurrentScreenSummaryForSpeech = (): string => {
     if (screen.type === 'home') {
-      return "Bienvenue dans L'Atelier Alphabette. Que souhaitez-vous créer aujourd'hui ? Choisissez parmi nos 4 grandes catégories : 1. Mémoire et Transmission. 2. Arts Visuels et Création. 3. Musique, Poésie et Humour. 4. Cuisine, Voyages et Curiosité.";
+      return "Bienvenue dans L'Atelier Alphabette. Que souhaitez-vous créer aujourd'hui ? Choisissez parmi nos 4 grandes catégories : 1. Mémoire et Transmission. 2. Arts Visuels et Création. 3. Musique, Poésie et Humour. 4. Cuisine, Voyages et Curiosité. Vous trouverez aussi juste dessous des propositions rapides prêtes à démarrer.";
     }
     if (screen.type === 'category') {
       const cat = getCategoryById(screen.categoryId);
@@ -235,12 +222,16 @@ export default function App() {
       const w = getWorkshopById(screen.workshopId);
       if (!w) return '';
       const step = w.steps[screen.stepIndex];
-      return `Atelier ${w.title}. Étape ${screen.stepIndex + 1} sur 3. ${step.question}. Les choix proposés sont : ${step.options
+      const extra = extraStepOptions[`${w.id}-${screen.stepIndex}`] || [];
+      const allOpts = [...step.options, ...extra];
+      return `Atelier ${w.title}. Étape ${screen.stepIndex + 1} sur 3. ${step.question}. Voici quelques choix proposés : ${allOpts
+        .slice(0, 6)
         .map((o) => o.label)
         .join(', ')}.`;
     }
     if (screen.type === 'result') {
-      return `${screen.creation.title}. ${screen.creation.subtitle}. ${screen.creation.content}`;
+      const workshop = getWorkshopById(screen.workshopId);
+      return buildReadableCreationText(screen.creation, workshop);
     }
     if (screen.type === 'gallery') {
       return `Mes Créations sauvegardées. Vous avez ${savedCreations.length} création${
@@ -250,78 +241,146 @@ export default function App() {
     return 'Votre création est en train de prendre vie.';
   };
 
-  // Speech Recognition (Web Speech API Dictation)
-  const handleToggleDictate = (onTranscriptReady?: (transcript: string) => void) => {
+  // Speech Recognition (Web Speech API + Gemini Transcribe universal microphone fallback)
+  const handleToggleDictate = async (onTranscriptReady?: (transcript: string) => void) => {
+    const applyTranscript = (transcript: string) => {
+      setVoiceBannerMessage(`Texte dicté reçu : « ${transcript} »`);
+      if (onTranscriptReady) {
+        onTranscriptReady(transcript);
+      } else if (screen.type === 'workshop-step') {
+        const stepKey = `step${screen.stepIndex + 1}` as 'step1' | 'step2' | 'step3';
+        setSelections((prev) => ({ ...prev, [stepKey]: transcript }));
+      }
+    };
+
     const SpeechRecognitionCtor =
       (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown })
         .SpeechRecognition ||
       (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
 
-    if (!SpeechRecognitionCtor) {
-      setVoiceBannerMessage(
-        'Astuce : La dictée vocale directe dépend de votre microphone. Vous pouvez simplement toucher l’un des gros boutons proposés à l’écran !'
-      );
-      setTimeout(() => setVoiceBannerMessage(null), 5000);
-      return;
-    }
-
-    if (isListening) {
-      try {
-        (recognitionRef.current as { stop?: () => void })?.stop?.();
-      } catch {
-        // ignore
-      }
-      setIsListening(false);
-      return;
-    }
-
-    try {
-      const recognition = new (SpeechRecognitionCtor as new () => {
-        lang: string;
-        interimResults: boolean;
-        maxAlternatives: number;
-        onresult: (event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
-        onerror: () => void;
-        onend: () => void;
-        start: () => void;
-      })();
-
-      recognition.lang = 'fr-FR';
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
-
-      recognition.onresult = (event) => {
-        const transcript = event.results?.[0]?.[0]?.transcript?.trim();
-        if (transcript) {
-          setVoiceBannerMessage(`Texte dicté reçu : « ${transcript} »`);
-          if (onTranscriptReady) {
-            onTranscriptReady(transcript);
-          } else if (screen.type === 'workshop-step') {
-            const stepKey = `step${screen.stepIndex + 1}` as 'step1' | 'step2' | 'step3';
-            setSelections((prev) => ({ ...prev, [stepKey]: transcript }));
-          }
+    if (SpeechRecognitionCtor) {
+      if (isListening) {
+        try {
+          (recognitionRef.current as { stop?: () => void })?.stop?.();
+        } catch {
+          // ignore
         }
         setIsListening(false);
-      };
+        return;
+      }
 
-      recognition.onerror = () => {
+      try {
+        const recognition = new (SpeechRecognitionCtor as new () => {
+          lang: string;
+          interimResults: boolean;
+          maxAlternatives: number;
+          onresult: (event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+          onerror: () => void;
+          onend: () => void;
+          start: () => void;
+        })();
+
+        recognition.lang = 'fr-FR';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onresult = (event) => {
+          const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+          if (transcript) {
+            applyTranscript(transcript);
+          }
+          setIsListening(false);
+        };
+
+        recognition.onerror = () => {
+          setIsListening(false);
+          setVoiceBannerMessage(
+            'Nous n’avons pas entendu votre voix. Vous pouvez réessayer ou toucher l’un des gros boutons.'
+          );
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+        setIsListening(true);
+        setVoiceBannerMessage('Parlez maintenant à voix haute, nous vous écoutons...');
+        recognition.start();
+        return;
+      } catch {
         setIsListening(false);
-        setVoiceBannerMessage(
-          'Nous n’avons pas entendu votre voix. Vous pouvez réessayer ou toucher l’un des gros boutons.'
-        );
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      setIsListening(true);
-      setVoiceBannerMessage('Parlez maintenant à voix haute, nous vous écoutons...');
-      recognition.start();
-    } catch {
-      setIsListening(false);
+      }
     }
+
+    // Fallback via MediaRecorder + Google Gemini Transcribe (/api/atelier/transcribe)
+    if (isListening && mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      return;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaStreamRef.current = stream;
+        const chunks: BlobPart[] = [];
+        const recorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (ev) => {
+          if (ev.data.size > 0) chunks.push(ev.data);
+        };
+
+        recorder.onstop = async () => {
+          setIsListening(false);
+          mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+          mediaStreamRef.current = null;
+          mediaRecorderRef.current = null;
+
+          const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+          if (blob.size < 200) return;
+
+          setVoiceBannerMessage('Transcription de votre voix en cours...');
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const dataUrl = String(reader.result || '');
+            const base64 = dataUrl.split(',')[1] || '';
+            if (!base64) return;
+            try {
+              const res = await fetch('/api/atelier/transcribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  audioBase64: base64,
+                  mimeType: blob.type || 'audio/webm',
+                }),
+              });
+              const data = await res.json();
+              if (data?.transcript) {
+                applyTranscript(data.transcript);
+              } else {
+                setVoiceBannerMessage('Nous n’avons pas pu reconnaître la phrase, essayez à nouveau ou touchez une proposition.');
+              }
+            } catch {
+              setVoiceBannerMessage('Impossible de joindre le service vocal pour le moment.');
+            }
+          };
+          reader.readAsDataURL(blob);
+        };
+
+        setIsListening(true);
+        setVoiceBannerMessage('Parlez maintenant, puis touchez le bouton pour arrêter l’enregistrement...');
+        recorder.start();
+        return;
+      } catch {
+        setIsListening(false);
+      }
+    }
+
+    setVoiceBannerMessage(
+      'Astuce : La dictée vocale directe dépend de votre microphone. Touchez l’une des nombreuses propositions ou écrivez librement votre idée !'
+    );
+    setTimeout(() => setVoiceBannerMessage(null), 5000);
   };
 
   // Start a workshop
@@ -376,9 +435,19 @@ export default function App() {
       minute: '2-digit',
     });
 
+    const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs = 38000) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     try {
       if (workshop.mode === 'quiz') {
-        const res = await fetch('/api/atelier/quiz', {
+        const res = await fetchWithTimeout('/api/atelier/quiz', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -418,13 +487,14 @@ export default function App() {
       }
 
       if (workshop.mode === 'interactive') {
-        const res = await fetch('/api/atelier/interactive', {
+        const res = await fetchWithTimeout('/api/atelier/interactive', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             workshopId: workshop.id,
             selections: currentSelections,
             history: [],
+            adjustmentInstruction,
           }),
         });
 
@@ -436,7 +506,12 @@ export default function App() {
             content: data.content,
             choices: Array.isArray(data.choices) && data.choices.length > 0
               ? data.choices
-              : ['Continuer la promenade', 'Poser une autre question'],
+              : [
+                  'Continuer la promenade',
+                  'Poser une autre question',
+                  'Découvrir un détail secret',
+                  'S’accorder une pause gourmande',
+                ],
           };
         } else {
           chapter = generateLocalInteractiveFallback(workshop, currentSelections, 0);
@@ -466,7 +541,7 @@ export default function App() {
       const category = getCategoryById(workshop.categoryId);
       const userPrompt = buildWorkshopUserPrompt(workshop, currentSelections);
 
-      const res = await fetch('/api/atelier/create', {
+      const res = await fetchWithTimeout('/api/atelier/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -479,7 +554,7 @@ export default function App() {
           adjustmentInstruction,
           isVisual: workshop.mode === 'visual',
         }),
-      });
+      }, workshop.mode === 'visual' ? 45000 : 38000);
 
       let newCreation: SavedCreation;
 
@@ -517,16 +592,49 @@ export default function App() {
       setScreen({ type: 'result', workshopId: workshop.id, creation: newCreation });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch {
-      const fallback = generateLocalCreationFallback(
-        workshop,
-        currentSelections,
-        adjustmentInstruction
-      );
-      const newCreation: SavedCreation = {
-        ...fallback,
-        id: `creation-${Date.now()}`,
-        createdAt: nowFormatted,
-      };
+      let newCreation: SavedCreation;
+      if (workshop.mode === 'quiz') {
+        const quizData = generateLocalQuizFallback(currentSelections);
+        newCreation = {
+          id: `creation-${Date.now()}`,
+          workshopId: workshop.id,
+          workshopTitle: workshop.title,
+          workshopEmoji: workshop.emoji,
+          categoryId: workshop.categoryId,
+          createdAt: nowFormatted,
+          selections: currentSelections,
+          title: quizData.title,
+          subtitle: quizData.subtitle,
+          content: `Quiz interactif de 5 questions sur « ${currentSelections.step1} ».`,
+          quizQuestions: quizData.questions,
+        };
+      } else if (workshop.mode === 'interactive') {
+        const chapter = generateLocalInteractiveFallback(workshop, currentSelections, 0);
+        newCreation = {
+          id: `creation-${Date.now()}`,
+          workshopId: workshop.id,
+          workshopTitle: workshop.title,
+          workshopEmoji: workshop.emoji,
+          categoryId: workshop.categoryId,
+          createdAt: nowFormatted,
+          selections: currentSelections,
+          title: `${workshop.title} : ${currentSelections.step1.split(' — ')[0]}`,
+          subtitle: `${currentSelections.step2}`,
+          content: chapter.content,
+          interactiveHistory: [chapter],
+        };
+      } else {
+        const fallback = generateLocalCreationFallback(
+          workshop,
+          currentSelections,
+          adjustmentInstruction
+        );
+        newCreation = {
+          ...fallback,
+          id: `creation-${Date.now()}`,
+          createdAt: nowFormatted,
+        };
+      }
       setSavedCreations((prev) => [newCreation, ...prev]);
       setScreen({ type: 'result', workshopId: workshop.id, creation: newCreation });
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -545,19 +653,27 @@ export default function App() {
     const existingHistory = creation.interactiveHistory || [];
 
     try {
-      const res = await fetch('/api/atelier/interactive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workshopId: workshop.id,
-          selections: creation.selections,
-          history: existingHistory.map((h) => ({
-            text: h.content,
-            choice: h.choiceMade,
-          })),
-          userChoice: choiceText,
-        }),
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 38000);
+      let res: Response;
+      try {
+        res = await fetch('/api/atelier/interactive', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            workshopId: workshop.id,
+            selections: creation.selections,
+            history: existingHistory.map((h) => ({
+              text: h.content,
+              choice: h.choiceMade,
+            })),
+            userChoice: choiceText,
+          }),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
 
       let nextChapter;
       if (res.ok) {
@@ -622,9 +738,147 @@ export default function App() {
     }
   };
 
+  // Load 4 more fresh step propositions from Google Gemini / local pool
+  const handleLoadMoreStepSuggestions = async (
+    workshop: WorkshopDefinition,
+    stepIndex: 0 | 1 | 2
+  ) => {
+    const key = `${workshop.id}-${stepIndex}`;
+    const currentStep = workshop.steps[stepIndex];
+    const existingExtra = extraStepOptions[key] || [];
+    const existingLabels = [...currentStep.options, ...existingExtra].map((o) => o.label);
+
+    setIsLoadingStepSuggestions(true);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      let newOptions: ChoiceOption[] = [];
+      try {
+        const res = await fetch('/api/atelier/suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            mode: 'step',
+            workshopId: workshop.id,
+            stepIndex,
+            existingLabels,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.options)) {
+            newOptions = data.options;
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (newOptions.length === 0) {
+        newOptions = generateLocalStepSuggestionsFallback(workshop, stepIndex, existingLabels);
+      }
+
+      setExtraStepOptions((prev) => ({
+        ...prev,
+        [key]: [...(prev[key] || []), ...newOptions],
+      }));
+    } catch {
+      const fallback = generateLocalStepSuggestionsFallback(workshop, stepIndex, existingLabels);
+      setExtraStepOptions((prev) => ({
+        ...prev,
+        [key]: [...(prev[key] || []), ...fallback],
+      }));
+    } finally {
+      setIsLoadingStepSuggestions(false);
+    }
+  };
+
+  // Load 4 fresh continuation choices in interactive mode (#17, #19, #20)
+  const handleMoreInteractiveChoices = async (
+    workshop: WorkshopDefinition,
+    creation: SavedCreation
+  ) => {
+    const existingHistory = creation.interactiveHistory || [];
+    if (existingHistory.length === 0) return;
+
+    const latest = existingHistory[existingHistory.length - 1];
+    setIsLoadingMoreInteractiveChoices(true);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      let freshChoices: string[] = [];
+      try {
+        const res = await fetch('/api/atelier/suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            mode: 'interactive',
+            workshopId: workshop.id,
+            selections: creation.selections,
+            existingLabels: latest.choices,
+            history: existingHistory.map((h) => ({ text: h.content, choice: h.choiceMade })),
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.choices) && data.choices.length > 0) {
+            freshChoices = data.choices;
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (freshChoices.length === 0) {
+        freshChoices = [
+          'Découvrir un détail secret ou une anecdote inattendue',
+          'Prendre un instant calme pour observer les alentours',
+          'Poser une question sur les souvenirs d’enfance',
+          'Partager un moment gourmand ou musical ensemble',
+        ];
+      }
+
+      const updatedHistory = existingHistory.map((chap, idx) =>
+        idx === existingHistory.length - 1 ? { ...chap, choices: freshChoices } : chap
+      );
+      const updatedCreation: SavedCreation = {
+        ...creation,
+        interactiveHistory: updatedHistory,
+      };
+      setSavedCreations((prev) =>
+        prev.map((c) => (c.id === creation.id ? updatedCreation : c))
+      );
+      setScreen({
+        type: 'result',
+        workshopId: workshop.id,
+        creation: updatedCreation,
+      });
+    } finally {
+      setIsLoadingMoreInteractiveChoices(false);
+    }
+  };
+
+  // Launch a Home quick proposition directly
+  const handleSelectQuickProposition = (prop: HomeQuickProposition) => {
+    const workshop = getWorkshopById(prop.workshopId);
+    if (!workshop) return;
+    setSelections(prop.selections);
+    navigateTo({
+      type: 'workshop-step',
+      workshopId: workshop.id,
+      stepIndex: 2,
+    });
+  };
+
+  const handleToggleBigMode = () => {
+    setFontScaleIndex((prev) => (prev === 0 ? 2 : 0));
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-white dark:bg-slate-950 text-slate-950 dark:text-white">
-      {/* 1. Barre supérieure fixe Alphabette (se masque automatiquement au scroll vers le bas) */}
+    <div className="min-h-screen flex flex-col bg-[#f8fafc] dark:bg-slate-950 text-slate-950 dark:text-white">
+      {/* DOUBLE BARRE ALPHABETTE FIXE */}
       <TopBarAlphabette
         onGoHome={handleGoHome}
         fontScaleIndex={fontScaleIndex}
@@ -632,9 +886,23 @@ export default function App() {
         onChangeFontScale={(dir) =>
           setFontScaleIndex((prev) => getNextFontScale(prev, dir))
         }
+        onToggleBigMode={handleToggleBigMode}
+        isBigModeActive={fontScaleIndex > 0}
         highContrastDark={highContrastDark}
         onToggleContrast={() => setHighContrastDark((prev) => !prev)}
-        isHiddenOnScroll={hideBarsOnScroll}
+        canGoBack={screen.type !== 'home'}
+        onGoBack={handleGoBack}
+        isSpeaking={isSpeaking}
+        isAudioLoading={isAudioLoading}
+        onToggleSpeakScreen={() => {
+          if (isSpeaking || isAudioLoading) {
+            stopSpeaking();
+            return;
+          }
+          toggleSpeakText(getCurrentScreenSummaryForSpeech(), `topbar-${screen.type}`);
+        }}
+        isListening={isListening}
+        onToggleDictate={() => handleToggleDictate()}
       />
 
       {/* Voice / Dictation Feedback Banner */}
@@ -642,14 +910,14 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="no-print max-w-5xl mx-auto mt-4 px-4 w-full"
+          className="no-print max-w-6xl mx-auto mt-3 px-3 sm:px-4 w-full"
         >
-          <div className="p-4 rounded-2xl bg-amber-100 dark:bg-amber-950 border-2 border-amber-900 dark:border-amber-300 text-slate-950 dark:text-amber-100 font-bold text-lg flex items-center justify-between gap-4">
+          <div className="p-3.5 rounded-2xl bg-amber-100 dark:bg-amber-950 border-2 border-amber-900 dark:border-amber-300 text-slate-950 dark:text-amber-100 font-semibold text-base flex items-center justify-between gap-3">
             <span>🎙️ {voiceBannerMessage}</span>
             <button
               type="button"
               onClick={() => setVoiceBannerMessage(null)}
-              className="px-4 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-900 dark:border-amber-300 text-base cursor-pointer"
+              className="px-3 py-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-900 dark:border-amber-300 text-sm cursor-pointer shrink-0"
             >
               Fermer
             </button>
@@ -657,29 +925,42 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content Area with bottom padding for the permanent bottom bar */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 pt-6 pb-40 md:pb-32">
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-14">
         {/* ================================================================
-            ÉCRAN D'ACCUEIL : Message chaleureux + 4 Gros Boutons Catégories
+            ÉCRAN D'ACCUEIL : Message chaleureux + 4 Cartes Catégories
            ================================================================ */}
         {screen.type === 'home' && (
-          <div className="space-y-6">
-            <section className="p-5 md:p-7 rounded-3xl border-4 border-slate-900 dark:border-amber-300 bg-amber-50/60 dark:bg-slate-900 text-center space-y-2 shadow-sm">
-              <p className="text-lg font-bold text-blue-900 dark:text-amber-300">
+          <div className="space-y-4 sm:space-y-5">
+            <section className="p-4 sm:p-6 rounded-2xl border-2 border-slate-300 dark:border-amber-300/70 bg-white dark:bg-slate-900 text-center space-y-1.5 shadow-xs">
+              <p className="text-sm sm:text-base font-bold text-[#3f51b5] dark:text-amber-300">
                 Bienvenue dans votre espace créatif sans complexe
               </p>
-              <h1 className="text-3xl md:text-4xl font-serif-title font-bold text-slate-950 dark:text-white">
+              <h1 className="text-2xl sm:text-3xl font-serif-title font-bold text-slate-950 dark:text-white leading-snug">
                 Que souhaitez-vous créer aujourd’hui ?
               </h1>
-              <p className="text-lg md:text-xl text-slate-800 dark:text-slate-200 max-w-3xl mx-auto">
-                Touchez simplement une grande catégorie ci-dessous. Vous serez guidé(e) pas à pas par de gros boutons clairs, sans jamais avoir à taper au clavier.
+              <p className="text-base sm:text-lg text-slate-700 dark:text-slate-200 max-w-2xl mx-auto leading-relaxed">
+                Touchez simplement une grande catégorie ci-dessous. Vous serez guidé(e) pas à pas par de gros boutons clairs, sans avoir à taper au clavier.
               </p>
             </section>
 
-            {/* 4 Gros Boutons de Catégories aux couleurs distinctes et rassurantes */}
+            {/* Accès rapide Mes Créations sauvegardées */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => navigateTo({ type: 'gallery' })}
+                className="min-h-[44px] px-4 py-2 rounded-full bg-amber-50 hover:bg-amber-100 text-slate-950 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-white font-bold text-sm sm:text-base border-2 border-slate-900 dark:border-amber-300 flex items-center gap-2 cursor-pointer shadow-xs transition-colors"
+                aria-label={`Ouvrir mon album (${savedCreations.length} création${savedCreations.length > 1 ? 's' : ''})`}
+              >
+                <FolderHeart className="w-4 h-4 text-[#3f51b5] dark:text-amber-300 shrink-0" aria-hidden="true" />
+                <span>Mon Album ({savedCreations.length})</span>
+              </button>
+            </div>
+
+            {/* 4 Cartes Catégories aux couleurs distinctes et rassurantes */}
             <section
               aria-label="Les 4 grandes catégories d'ateliers"
-              className="grid grid-cols-1 md:grid-cols-2 gap-5"
+              className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4"
             >
               {CATEGORIES.map((category) => {
                 const workshopsInCategory = getWorkshopsByCategory(category.id);
@@ -691,37 +972,37 @@ export default function App() {
                     onClick={() =>
                       navigateTo({ type: 'category', categoryId: category.id })
                     }
-                    className={`min-h-[175px] p-5 md:p-6 rounded-3xl border-4 ${category.borderClass} ${category.bgLightClass} hover:brightness-95 active:scale-[0.99] text-left flex flex-col justify-between gap-3 shadow-sm transition-all cursor-pointer`}
+                    className={`min-h-[140px] p-4 sm:p-5 rounded-2xl border-2 ${category.borderClass} ${category.bgLightClass} hover:brightness-95 active:scale-[0.99] text-left flex flex-col justify-between gap-2.5 shadow-xs transition-all cursor-pointer`}
                   >
-                    <div className="flex items-start justify-between gap-4 w-full">
-                      <div className="space-y-1">
+                    <div className="flex items-start justify-between gap-3 w-full">
+                      <div className="space-y-0.5">
                         <span
-                          className={`text-base font-extrabold uppercase tracking-wider ${category.badgeTextClass}`}
+                          className={`text-xs sm:text-sm font-extrabold uppercase tracking-wider ${category.badgeTextClass}`}
                         >
                           Catégorie {category.number} · {workshopsInCategory.length} ateliers
                         </span>
-                        <h2 className="text-2xl md:text-3xl font-serif-title font-bold text-slate-950 dark:text-white">
+                        <h2 className="text-xl sm:text-2xl font-serif-title font-bold text-slate-950 dark:text-white leading-snug">
                           {category.title}
                         </h2>
                       </div>
                       <span
-                        className="text-4xl md:text-5xl shrink-0"
+                        className="text-3xl sm:text-4xl shrink-0"
                         aria-hidden="true"
                       >
                         {category.emoji}
                       </span>
                     </div>
 
-                    <p className="text-lg md:text-xl text-slate-800 dark:text-slate-200 font-medium leading-snug">
+                    <p className="text-base sm:text-lg text-slate-800 dark:text-slate-200 font-medium leading-snug">
                       {category.subtitle}
                     </p>
 
-                    <div className="pt-2 flex items-center justify-between w-full border-t-2 border-slate-900/15 dark:border-white/15">
-                      <span className="text-lg font-bold text-slate-950 dark:text-amber-300">
+                    <div className="pt-2 flex items-center justify-between w-full border-t border-slate-900/15 dark:border-white/15">
+                      <span className="text-sm sm:text-base font-bold text-slate-950 dark:text-amber-300">
                         Ouvrir les 5 ateliers
                       </span>
                       <ArrowRight
-                        className="w-7 h-7 text-slate-950 dark:text-amber-300"
+                        className="w-5 h-5 text-slate-950 dark:text-amber-300"
                         aria-hidden="true"
                       />
                     </div>
@@ -730,17 +1011,83 @@ export default function App() {
               })}
             </section>
 
+            {/* Propositions rapides prêtes à démarrer sur l'accueil */}
+            <section
+              aria-label="Propositions rapides prêtes à démarrer"
+              className="p-4 sm:p-5 rounded-2xl border-2 border-blue-900/30 dark:border-amber-300/60 bg-white dark:bg-slate-900 space-y-3.5 shadow-xs"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-[#3f51b5] dark:text-amber-300 shrink-0" aria-hidden="true" />
+                  <h2 className="text-lg sm:text-xl font-serif-title font-bold text-slate-950 dark:text-white">
+                    Envie d’inspiration ? Propositions prêtes en 1 clic
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setHomePropBatchIndex(
+                      (prev) => (prev + 4) % HOME_QUICK_PROPOSITIONS.length
+                    )
+                  }
+                  className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-950 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-amber-300 font-bold text-sm border border-blue-900/40 dark:border-amber-300 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                  <span>D’autres propositions</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Array.from({ length: 4 }, (_, offset) => {
+                  const item =
+                    HOME_QUICK_PROPOSITIONS[
+                      (homePropBatchIndex + offset) % HOME_QUICK_PROPOSITIONS.length
+                    ];
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleSelectQuickProposition(item)}
+                      className="p-3.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50/70 hover:bg-amber-50 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-left flex items-center justify-between gap-3 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span className="text-2xl shrink-0" aria-hidden="true">
+                          {item.emoji}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-bold text-base text-slate-950 dark:text-white leading-snug">
+                            {item.title}
+                          </p>
+                          <p className="text-sm text-slate-700 dark:text-slate-300 leading-snug mt-0.5">
+                            {item.description}
+                          </p>
+                        </div>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-[#3f51b5] dark:text-amber-300 shrink-0" aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
             {/* Reassuring Helper Card */}
-            <section className="p-6 rounded-3xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
+            <section className="p-4 sm:p-5 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
                 <HeartHandshake
-                  className="w-10 h-10 text-blue-900 dark:text-amber-300 shrink-0"
+                  className="w-7 h-7 text-[#3f51b5] dark:text-amber-300 shrink-0"
                   aria-hidden="true"
                 />
-                <p className="text-lg font-medium text-slate-800 dark:text-slate-200">
-                  <strong>Tout est sauvegardé automatiquement</strong> sur votre appareil dans l’onglet « Mes Créations » en bas de l’écran.
+                <p className="text-sm sm:text-base font-medium text-slate-800 dark:text-slate-200">
+                  <strong>Tout est sauvegardé automatiquement</strong> sur votre appareil dans « Mon Album ».
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => navigateTo({ type: 'gallery' })}
+                className="min-h-[42px] px-4 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-950 dark:text-white font-bold text-sm sm:text-base border border-slate-900 dark:border-slate-400 cursor-pointer shrink-0"
+              >
+                Voir mes créations
+              </button>
             </section>
           </div>
         )}
@@ -753,58 +1100,58 @@ export default function App() {
           const workshops = getWorkshopsByCategory(screen.categoryId);
 
           return (
-            <div className="space-y-8">
+            <div className="space-y-5">
               <div
-                className={`p-6 md:p-8 rounded-3xl border-4 ${category.borderClass} ${category.bgLightClass}`}
+                className={`p-4 sm:p-6 rounded-2xl border-2 ${category.borderClass} ${category.bgLightClass}`}
               >
-                <div className="flex items-center gap-4">
-                  <span className="text-5xl" aria-hidden="true">
+                <div className="flex items-center gap-3.5">
+                  <span className="text-4xl shrink-0" aria-hidden="true">
                     {category.emoji}
                   </span>
                   <div>
                     <p
-                      className={`text-base font-extrabold uppercase tracking-wider ${category.badgeTextClass}`}
+                      className={`text-xs sm:text-sm font-extrabold uppercase tracking-wider ${category.badgeTextClass}`}
                     >
                       Catégorie {category.number} · Choisissez votre atelier
                     </p>
-                    <h1 className="text-3xl md:text-4xl font-serif-title font-bold text-slate-950 dark:text-white">
+                    <h1 className="text-2xl sm:text-3xl font-serif-title font-bold text-slate-950 dark:text-white">
                       {category.title}
                     </h1>
-                    <p className="text-xl text-slate-800 dark:text-slate-200 mt-1">
+                    <p className="text-base sm:text-lg text-slate-800 dark:text-slate-200 mt-0.5">
                       Touchez l’atelier qui vous fait plaisir parmi les 5 propositions ci-dessous :
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-5">
+              <div className="grid grid-cols-1 gap-3.5">
                 {workshops.map((workshop) => (
                   <button
                     key={workshop.id}
                     type="button"
                     onClick={() => handleStartWorkshop(workshop)}
-                    className="min-h-[116px] p-6 md:p-7 rounded-3xl border-4 border-slate-900 dark:border-slate-200 bg-white hover:bg-amber-50/70 dark:bg-slate-900 dark:hover:bg-slate-800 text-left flex flex-col md:flex-row items-start md:items-center justify-between gap-5 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
+                    className="min-h-[96px] p-4 sm:p-5 rounded-2xl border-2 border-slate-900 dark:border-slate-200 bg-white hover:bg-amber-50/70 dark:bg-slate-900 dark:hover:bg-slate-800 text-left flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs transition-all active:scale-[0.99] cursor-pointer"
                   >
-                    <div className="flex items-start md:items-center gap-5">
-                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-amber-50 dark:bg-slate-800 border-2 border-slate-900 dark:border-amber-300 flex items-center justify-center text-4xl shrink-0">
+                    <div className="flex items-start md:items-center gap-4">
+                      <div className="w-14 h-14 rounded-xl bg-amber-50 dark:bg-slate-800 border-2 border-slate-900 dark:border-amber-300 flex items-center justify-center text-3xl shrink-0">
                         <span aria-hidden="true">{workshop.emoji}</span>
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-base font-bold text-blue-900 dark:text-amber-300">
+                      <div className="space-y-0.5">
+                        <p className="text-xs sm:text-sm font-bold text-blue-900 dark:text-amber-300">
                           Atelier n° {workshop.number}
                         </p>
-                        <h2 className="text-2xl md:text-3xl font-serif-title font-bold text-slate-950 dark:text-white">
+                        <h2 className="text-xl sm:text-2xl font-serif-title font-bold text-slate-950 dark:text-white">
                           {workshop.title}
                         </h2>
-                        <p className="text-xl text-slate-800 dark:text-slate-200">
+                        <p className="text-base sm:text-lg text-slate-700 dark:text-slate-200">
                           {workshop.shortDescription}
                         </p>
                       </div>
                     </div>
 
-                    <div className="min-h-[60px] px-6 py-3 rounded-2xl bg-blue-900 text-white dark:bg-amber-300 dark:text-slate-950 font-bold text-xl flex items-center gap-2 shrink-0 self-stretch md:self-center justify-center">
+                    <div className="min-h-[48px] px-5 py-2.5 rounded-xl bg-blue-900 text-white dark:bg-amber-300 dark:text-slate-950 font-bold text-base sm:text-lg flex items-center gap-2 shrink-0 self-stretch md:self-center justify-center">
                       <span>Commencer</span>
-                      <ArrowRight className="w-6 h-6" aria-hidden="true" />
+                      <ArrowRight className="w-5 h-5" aria-hidden="true" />
                     </div>
                   </button>
                 ))}
@@ -824,19 +1171,19 @@ export default function App() {
           const currentValue = selections[stepKey];
 
           return (
-            <div className="space-y-8">
+            <div className="space-y-5">
               {/* Step Progress Header */}
-              <div className="p-6 md:p-8 rounded-3xl border-4 border-slate-900 dark:border-amber-300 bg-slate-50 dark:bg-slate-900 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="p-4 sm:p-6 rounded-2xl border-2 border-slate-900 dark:border-amber-300 bg-white dark:bg-slate-900 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="text-4xl" aria-hidden="true">
+                    <span className="text-3xl shrink-0" aria-hidden="true">
                       {workshop.emoji}
                     </span>
                     <div>
-                      <p className="text-base font-bold text-blue-900 dark:text-amber-300">
+                      <p className="text-xs sm:text-sm font-bold text-blue-900 dark:text-amber-300">
                         Atelier n° {workshop.number} · {workshop.title}
                       </p>
-                      <h1 className="text-2xl md:text-4xl font-serif-title font-bold text-slate-950 dark:text-white">
+                      <h1 className="text-xl sm:text-2xl font-serif-title font-bold text-slate-950 dark:text-white">
                         Étape {stepIndex + 1} sur 3 : {currentStep.question}
                       </h1>
                     </div>
@@ -844,7 +1191,7 @@ export default function App() {
 
                   {/* Step Indicator Buttons (1 - 2 - 3) */}
                   <div
-                    className="flex items-center gap-2"
+                    className="flex items-center gap-1.5"
                     aria-label="Progression des 3 étapes"
                   >
                     {[0, 1, 2].map((idx) => (
@@ -858,10 +1205,10 @@ export default function App() {
                             stepIndex: idx as 0 | 1 | 2,
                           })
                         }
-                        className={`min-h-[54px] px-4 py-2 rounded-2xl font-bold text-lg border-2 cursor-pointer ${
+                        className={`min-h-[44px] px-3 py-1.5 rounded-xl font-bold text-sm sm:text-base border-2 cursor-pointer ${
                           stepIndex === idx
                             ? 'bg-blue-900 text-white border-slate-950 dark:bg-amber-300 dark:text-slate-950'
-                            : 'bg-white text-slate-900 border-slate-900 dark:bg-slate-800 dark:text-white dark:border-slate-400'
+                            : 'bg-slate-50 text-slate-900 border-slate-900 dark:bg-slate-800 dark:text-white dark:border-slate-400'
                         }`}
                       >
                         Étape {idx + 1}
@@ -870,96 +1217,163 @@ export default function App() {
                   </div>
                 </div>
 
-                <p className="text-xl text-slate-800 dark:text-slate-200 font-medium">
+                <p className="text-base sm:text-lg text-slate-700 dark:text-slate-200 font-medium">
                   {currentStep.helperText}
                 </p>
               </div>
 
-              {/* 4 to 6 Large Visual Choice Buttons */}
-              <div
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
-                role="group"
-                aria-label={currentStep.question}
-              >
-                {currentStep.options.map((opt) => {
-                  const isSelected = currentValue === opt.label;
+              {/* 8+ Large Visual Choice Buttons + Dynamic "Voir d'autres propositions" */}
+              {(() => {
+                const extraKey = `${workshop.id}-${stepIndex}`;
+                const allStepOptions = [
+                  ...currentStep.options,
+                  ...(extraStepOptions[extraKey] || []),
+                ];
 
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() =>
-                        handleSelectStepOption(workshop, stepIndex, opt.label)
-                      }
-                      className={`min-h-[88px] p-5 md:p-6 rounded-2xl border-4 text-left flex items-center justify-between gap-4 transition-all active:scale-[0.99] cursor-pointer ${
-                        isSelected
-                          ? 'bg-blue-900 text-white border-slate-950 dark:bg-amber-300 dark:text-slate-950 dark:border-white shadow-md'
-                          : 'bg-white hover:bg-blue-50/70 text-slate-950 border-slate-900 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-white dark:border-slate-300'
-                      }`}
+                return (
+                  <div className="space-y-3">
+                    <div
+                      className="grid grid-cols-1 md:grid-cols-2 gap-3"
+                      role="group"
+                      aria-label={currentStep.question}
                     >
-                      <div className="flex items-center gap-4">
-                        <span className="text-4xl shrink-0" aria-hidden="true">
-                          {opt.emoji}
-                        </span>
-                        <span className="text-xl md:text-2xl font-bold leading-snug">
-                          {opt.label}
-                        </span>
-                      </div>
-                      {isSelected && (
-                        <CheckCircle2
-                          className="w-8 h-8 shrink-0"
-                          aria-label="Choix sélectionné"
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                      {allStepOptions.map((opt) => {
+                        const isSelected = currentValue === opt.label;
 
-              {/* Optional Microphone Button ("Ou dites-le à voix haute") */}
-              <div className="p-6 rounded-3xl border-2 border-rose-900 dark:border-rose-300 bg-rose-50/60 dark:bg-slate-900 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="space-y-1 text-center md:text-left">
-                  <p className="text-xl font-bold text-slate-950 dark:text-white">
-                    🎙️ Vous préférez le dire avec vos propres mots ?
-                  </p>
-                  <p className="text-lg text-slate-800 dark:text-slate-200">
-                    Choix actuel pour cette étape :{' '}
-                    <strong className="underline">{currentValue}</strong>
-                  </p>
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() =>
+                              handleSelectStepOption(workshop, stepIndex, opt.label)
+                            }
+                            className={`min-h-[70px] p-4 sm:p-5 rounded-2xl border-2 text-left flex items-center justify-between gap-3 transition-all active:scale-[0.99] cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-900 text-white border-slate-950 dark:bg-amber-300 dark:text-slate-950 dark:border-white shadow-sm'
+                                : 'bg-white hover:bg-blue-50/70 text-slate-950 border-slate-900 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-white dark:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-3xl shrink-0" aria-hidden="true">
+                                {opt.emoji}
+                              </span>
+                              <span className="text-base sm:text-lg font-bold leading-snug">
+                                {opt.label}
+                              </span>
+                            </div>
+                            {isSelected && (
+                              <CheckCircle2
+                                className="w-6 h-6 shrink-0"
+                                aria-label="Choix sélectionné"
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex justify-center pt-1">
+                      <button
+                        type="button"
+                        disabled={isLoadingStepSuggestions}
+                        onClick={() =>
+                          handleLoadMoreStepSuggestions(workshop, stepIndex)
+                        }
+                        className="min-h-[50px] px-6 py-2.5 rounded-full bg-amber-50 hover:bg-amber-100 disabled:opacity-60 text-slate-950 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-amber-300 font-bold text-base sm:text-lg border-2 border-amber-700 dark:border-amber-300 flex items-center gap-2.5 shadow-xs cursor-pointer"
+                      >
+                        {isLoadingStepSuggestions ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin shrink-0" aria-hidden="true" />
+                            <span>Recherche de nouvelles idées...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-5 h-5 shrink-0" aria-hidden="true" />
+                            <span>Voir d’autres propositions ({allStepOptions.length} disponibles)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Optional Custom Text & Microphone Button ("Ou dites-le à voix haute") */}
+              <div className="p-4 sm:p-5 rounded-2xl border-2 border-rose-900 dark:border-rose-300 bg-rose-50/60 dark:bg-slate-900 space-y-3">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+                  <div className="space-y-0.5 text-center md:text-left">
+                    <p className="text-base sm:text-lg font-bold text-slate-950 dark:text-white">
+                      🎙️ Vous préférez le dire ou l’écrire avec vos propres mots ?
+                    </p>
+                    <p className="text-sm sm:text-base text-slate-800 dark:text-slate-200">
+                      Choix actuel pour cette étape :{' '}
+                      <strong className="underline">{currentValue}</strong>
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleDictate()}
+                    className={`min-h-[50px] px-5 py-2 rounded-xl font-bold text-base sm:text-lg border-2 flex items-center gap-2.5 shrink-0 cursor-pointer ${
+                      isListening
+                        ? 'bg-rose-800 text-white border-slate-950'
+                        : 'bg-white hover:bg-rose-100 text-rose-950 border-rose-900 dark:bg-slate-800 dark:text-rose-200 dark:border-rose-300'
+                    }`}
+                  >
+                    <Mic className="w-5 h-5 shrink-0" aria-hidden="true" />
+                    <span>
+                      {isListening
+                        ? 'Je vous écoute... (toucher pour finir)'
+                        : 'Dicter à voix haute'}
+                    </span>
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleToggleDictate()}
-                  className={`min-h-[68px] px-6 py-4 rounded-2xl font-bold text-xl border-2 flex items-center gap-3 shrink-0 cursor-pointer ${
-                    isListening
-                      ? 'bg-rose-800 text-white border-slate-950'
-                      : 'bg-white hover:bg-rose-100 text-rose-950 border-rose-900 dark:bg-slate-800 dark:text-rose-200 dark:border-rose-300'
-                  }`}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const trimmed = customStepIdea.trim();
+                    if (!trimmed) return;
+                    setSelections((prev) => ({ ...prev, [stepKey]: trimmed }));
+                    setCustomStepIdea('');
+                  }}
+                  className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
                 >
-                  <Mic className="w-7 h-7 shrink-0" aria-hidden="true" />
-                  <span>
-                    {isListening
-                      ? 'Je vous écoute... (toucher pour finir)'
-                      : 'Ou dites-le à voix haute'}
-                  </span>
-                </button>
+                  <input
+                    type="text"
+                    value={customStepIdea}
+                    onChange={(e) => setCustomStepIdea(e.target.value)}
+                    placeholder={
+                      currentStep.voicePromptPlaceholder ||
+                      'Écrivez ici votre propre idée si vous le souhaitez (facultatif)...'
+                    }
+                    className="flex-1 min-h-[48px] px-4 py-2 rounded-xl bg-white dark:bg-slate-800 text-slate-950 dark:text-white border-2 border-slate-900 dark:border-slate-300 text-base font-medium"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!customStepIdea.trim()}
+                    className="min-h-[48px] px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white dark:bg-amber-300 dark:text-slate-950 font-bold text-base flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Check className="w-5 h-5 shrink-0" aria-hidden="true" />
+                    <span>Utiliser cette idée</span>
+                  </button>
+                </form>
               </div>
 
               {/* Summary of 3 Choices & Giant Final Button "Créer maintenant" */}
-              <div className="p-6 md:p-8 rounded-3xl border-4 border-emerald-900 dark:border-emerald-300 bg-emerald-50 dark:bg-slate-900 space-y-5">
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-bold text-slate-950 dark:text-white">
+              <div className="p-4 sm:p-6 rounded-2xl border-2 border-emerald-900 dark:border-emerald-300 bg-emerald-50 dark:bg-slate-900 space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-lg sm:text-xl font-bold text-slate-950 dark:text-white">
                     Vos 3 choix pour cet atelier :
                   </h2>
-                  <p className="text-xl text-slate-900 dark:text-slate-100">
+                  <p className="text-base sm:text-lg text-slate-900 dark:text-slate-100">
                     1. <strong>{selections.step1}</strong> · 2.{' '}
                     <strong>{selections.step2}</strong> · 3.{' '}
                     <strong>{selections.step3}</strong>
                   </p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   {stepIndex < 2 && (
                     <button
                       type="button"
@@ -970,19 +1384,19 @@ export default function App() {
                           stepIndex: (stepIndex + 1) as 1 | 2,
                         })
                       }
-                      className="min-h-[72px] px-6 py-4 rounded-2xl bg-white hover:bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white font-bold text-xl border-2 border-slate-900 dark:border-slate-300 flex items-center justify-center gap-3 cursor-pointer"
+                      className="min-h-[54px] px-5 py-3 rounded-xl bg-white hover:bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white font-bold text-base sm:text-lg border-2 border-slate-900 dark:border-slate-300 flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>Passer à l’étape {stepIndex + 2} sur 3</span>
-                      <ArrowRight className="w-7 h-7" aria-hidden="true" />
+                      <ArrowRight className="w-5 h-5" aria-hidden="true" />
                     </button>
                   )}
 
                   <button
                     type="button"
                     onClick={() => handleCreateNow(workshop, selections)}
-                    className="min-h-[76px] flex-1 px-8 py-5 rounded-2xl bg-emerald-800 hover:bg-emerald-900 text-white dark:bg-emerald-400 dark:text-slate-950 dark:hover:bg-emerald-300 font-extrabold text-2xl border-4 border-slate-950 dark:border-white flex items-center justify-center gap-4 shadow-md transition-transform active:scale-[0.99] cursor-pointer"
+                    className="min-h-[58px] flex-1 px-6 py-3.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white dark:bg-emerald-400 dark:text-slate-950 dark:hover:bg-emerald-300 font-extrabold text-lg sm:text-xl border-2 border-slate-950 dark:border-white flex items-center justify-center gap-3 shadow-sm transition-transform active:scale-[0.99] cursor-pointer"
                   >
-                    <Wand2 className="w-8 h-8 shrink-0" aria-hidden="true" />
+                    <Wand2 className="w-6 h-6 shrink-0" aria-hidden="true" />
                     <span>Créer maintenant</span>
                   </button>
                 </div>
@@ -1029,6 +1443,7 @@ export default function App() {
 
           return (
             <ResultView
+              key={screen.creation.id}
               workshop={workshop}
               creation={screen.creation}
               isSaved={isAlreadySaved}
@@ -1037,17 +1452,22 @@ export default function App() {
                   setSavedCreations((prev) => [screen.creation, ...prev]);
                 }
                 setVoiceBannerMessage(
-                  'Votre création est bien sauvegardée dans « Mes Créations » !'
+                  'Votre création est bien sauvegardée dans « Album » !'
                 );
               }}
-              isSpeaking={isSpeaking}
-              onToggleSpeak={(txt) => speakText(txt)}
+              speakingTargetId={speakingTargetId}
+              isAudioLoading={isAudioLoading}
+              onToggleSpeak={(txt, targetId) => toggleSpeakText(txt, targetId)}
               onAdjust={(instruction) =>
                 handleCreateNow(workshop, screen.creation.selections, instruction)
               }
               onContinueInteractive={(choiceText) =>
                 handleContinueInteractive(workshop, screen.creation, choiceText)
               }
+              onMoreInteractiveChoices={() =>
+                handleMoreInteractiveChoices(workshop, screen.creation)
+              }
+              isLoadingMoreChoices={isLoadingMoreInteractiveChoices}
               isLoadingAdjustment={isLoadingAdjustment}
               isListening={isListening}
               onToggleDictateQuestion={() =>
@@ -1065,6 +1485,8 @@ export default function App() {
         {screen.type === 'gallery' && (
           <SavedGalleryView
             creations={savedCreations}
+            speakingTargetId={speakingTargetId}
+            isAudioLoading={isAudioLoading}
             onOpenCreation={(item) =>
               navigateTo({
                 type: 'result',
@@ -1073,7 +1495,10 @@ export default function App() {
               })
             }
             onSpeakCreation={(item) =>
-              speakText(`${item.title}. ${item.subtitle}. ${item.content}`)
+              toggleSpeakText(
+                buildReadableCreationText(item, getWorkshopById(item.workshopId)),
+                `gallery-${item.id}`
+              )
             }
             onDeleteCreation={(id) =>
               setSavedCreations((prev) => prev.filter((c) => c.id !== id))
@@ -1082,20 +1507,6 @@ export default function App() {
           />
         )}
       </main>
-
-      {/* 2. Barre inférieure fixe Alphabette (se masque automatiquement au scroll vers le bas) */}
-      <BottomBarAlphabette
-        canGoBack={screen.type !== 'home'}
-        onGoBack={handleGoBack}
-        onOpenGallery={() => navigateTo({ type: 'gallery' })}
-        savedCount={savedCreations.length}
-        isGalleryActive={screen.type === 'gallery'}
-        isSpeaking={isSpeaking}
-        onToggleSpeakScreen={() => speakText(getCurrentScreenSummaryForSpeech())}
-        isListening={isListening}
-        onToggleDictate={() => handleToggleDictate()}
-        isHiddenOnScroll={hideBarsOnScroll}
-      />
     </div>
   );
 }

@@ -8,7 +8,7 @@ import {
   InteractiveChapter,
 } from '../data/workshops';
 
-export const FONT_SCALE_VALUES = [20, 23, 26, 29] as const;
+export const FONT_SCALE_VALUES = [16, 18, 20, 22] as const;
 
 export function getNextFontScale(currentIndex: number, direction: 'up' | 'down'): number {
   if (direction === 'up') {
@@ -403,6 +403,225 @@ export function generateLocalQuizFallback(selections: {
   };
 }
 
+export interface HomeQuickProposition {
+  id: string;
+  workshopId: string;
+  emoji: string;
+  title: string;
+  description: string;
+  selections: {
+    step1: string;
+    step2: string;
+    step3: string;
+  };
+}
+
+export const HOME_QUICK_PROPOSITIONS: HomeQuickProposition[] = [
+  {
+    id: 'prop-conte-foret',
+    workshopId: 'contes-petits-enfants',
+    emoji: '🐿️',
+    title: 'Conte du petit écureuil curieux',
+    description: 'Dans une forêt dorée d’automne, sur le bonheur de partager.',
+    selections: {
+      step1: 'Un petit écureuil curieux',
+      step2: 'Dans une forêt dorée d’automne',
+      step3: 'Le bonheur de partager avec ses amis',
+    },
+  },
+  {
+    id: 'prop-cafe-hug',
+    workshopId: 'cafe-histoire',
+    emoji: '☕',
+    title: 'Prendre le café avec Victor Hugo',
+    description: 'Une discussion chaleureuse dans un café historique parisien.',
+    selections: {
+      step1: 'Victor Hugo — Le grand poète et romancier',
+      step2: 'Dans un café historique aux banquettes de velours',
+      step3: '« Quel est votre plus beau souvenir de jeunesse ? »',
+    },
+  },
+  {
+    id: 'prop-voyage-italie',
+    workshopId: 'voyage-fauteuil',
+    emoji: '🍋',
+    title: 'Escapade en Toscane et aux lacs italiens',
+    description: 'Une promenade sensorielle dans la douceur des années 1960.',
+    selections: {
+      step1: 'Les lacs italiens et les ruelles de Toscane',
+      step2: 'Dans la douceur de vivre des années 1960',
+      step3: 'S’installer en terrasse pour observer la vie locale',
+    },
+  },
+  {
+    id: 'prop-quiz-cinema',
+    workshopId: 'quiz-maison',
+    emoji: '🎬',
+    title: 'Quiz du Grand Cinéma Français',
+    description: '5 questions conviviales sur Gabin, De Funès et Bourvil.',
+    selections: {
+      step1: 'Le grand cinéma français (Gabin, De Funès, Bourvil...)',
+      step2: 'Détente et plaisir : questions faciles et connues',
+      step3: 'Tranquillement pour mon plaisir personnel',
+    },
+  },
+  {
+    id: 'prop-recette-pommes',
+    workshopId: 'carnet-recettes',
+    emoji: '🥧',
+    title: 'Tarte douce aux pommes et cannelle',
+    description: 'Fiche recette illustrée façon grand-mère, simple et inratable.',
+    selections: {
+      step1: 'Un gâteau moelleux, une tarte ou une crème d’antan',
+      step2: 'Pommes, poires, cannelle et vanille',
+      step3: 'Recette rapide, inratable et peu de vaisselle',
+    },
+  },
+  {
+    id: 'prop-chanson-marne',
+    workshopId: 'chanson-guinguette',
+    emoji: '🪗',
+    title: 'Valse musette des bords de Marne',
+    description: 'Couplets joyeux et refrain à chantonner à l’accordéon.',
+    selections: {
+      step1: 'Une valse musette à trois temps (1, 2, 3...)',
+      step2: 'Les dimanches au bord de l’eau et les guinguettes',
+      step3: 'Un accordéon bretelle plein d’entrain',
+    },
+  },
+  {
+    id: 'prop-peinture-provence',
+    workshopId: 'atelier-peinture',
+    emoji: '🎨',
+    title: 'Aquarelle d’un village de Provence',
+    description: 'Toile baignée par la lumière ambrée du soleil couchant.',
+    selections: {
+      step1: 'Aquarelle douce et lumineuse',
+      step2: 'Un village de Provence bordé de lavandes',
+      step3: 'Les couleurs ambrées du soleil couchant',
+    },
+  },
+  {
+    id: 'prop-cafe-piaf',
+    workshopId: 'cafe-histoire',
+    emoji: '🎤',
+    title: 'Café en chanson avec Édith Piaf',
+    description: 'Rencontre intime sous la tonnelle d’une guinguette.',
+    selections: {
+      step1: 'Édith Piaf — La Môme à la voix inoubliable',
+      step2: 'À une table sous la tonnelle au bord de la rivière',
+      step3: '« Où trouviez-vous votre inspiration chaque matin ? »',
+    },
+  },
+  {
+    id: 'prop-blagues-famille',
+    workshopId: 'boite-blagues',
+    emoji: '😄',
+    title: '3 blagues douces pour le repas du dimanche',
+    description: 'Humour bon enfant sur la cuisine, le jardin et les animaux.',
+    selections: {
+      step1: 'Les gourmands, la cuisine et le potager',
+      step2: '3 petites histoires drôles à raconter à table',
+      step3: 'Pour toute la famille, de 7 à 97 ans',
+    },
+  },
+  {
+    id: 'prop-poesie-jardin',
+    workshopId: 'atelier-poesie',
+    emoji: '🪶',
+    title: 'Poème : Rosée, Pivoine & Silence',
+    description: 'Des rimes chantantes et apaisantes au fil des saisons.',
+    selections: {
+      step1: 'Rosée · Pivoine · Silence',
+      step2: 'La paix intérieure et la sérénité',
+      step3: 'De belles rimes classiques et chantantes',
+    },
+  },
+  {
+    id: 'prop-jardin-balcon',
+    workshopId: 'jardin-reve',
+    emoji: '🌻',
+    title: 'Balcon fleuri de roses et lavandes',
+    description: 'Plan de jardin idéal avec 3 astuces écologiques faciles.',
+    selections: {
+      step1: 'Un balcon ou un rebord de fenêtre ensoleillé',
+      step2: 'Lavande, marguerites et fleurs pour papillons',
+      step3: 'Un jardin facile toute l’année sans fatigue',
+    },
+  },
+  {
+    id: 'prop-heros-lettre',
+    workshopId: 'histoire-heros',
+    emoji: '🧭',
+    title: 'Le mystère de la lettre ancienne',
+    description: 'Une aventure douce au village avec un petit chien malicieux.',
+    selections: {
+      step1: 'Le mystère d’une lettre ancienne trouvée au village',
+      step2: 'Un petit chien malicieux au flair infaillible',
+      step3: 'Une belle loupe ancienne',
+    },
+  },
+];
+
+export function generateLocalStepSuggestionsFallback(
+  workshop: WorkshopDefinition,
+  stepIndex: 0 | 1 | 2,
+  existingLabels: string[]
+): { id: string; label: string; emoji: string }[] {
+  const existingSet = new Set(existingLabels.map((l) => l.toLowerCase().trim()));
+  const categoryExtras: Record<string, { label: string; emoji: string }[]> = {
+    memoire: [
+      { label: 'Un grand-père jardinier aux histoires merveilleuses', emoji: '🌻' },
+      { label: 'Un dimanche pluvieux transformé en fête au salon', emoji: '☔' },
+      { label: 'Le parfum d’un gâteau sorti tout chaud du four', emoji: '🥧' },
+      { label: 'Une promenade main dans la main au bord du canal', emoji: '🚶' },
+      { label: 'Une vieille boîte à biscuits remplie de photos jaunies', emoji: '📷' },
+      { label: 'La joie simple d’écrire une carte postale de vacances', emoji: '📮' },
+    ],
+    arts: [
+      { label: 'Un bouquet de tournesols et de bleuets dans un pichet en grès', emoji: '🌻' },
+      { label: 'Des barques colorées posées sur le sable fin à marée basse', emoji: '⛵' },
+      { label: 'Une couronne de feuilles d’automne et de pommes de pin', emoji: '🍁' },
+      { label: 'Un motif champêtre avec coccinelles et brins de muguet', emoji: '🐞' },
+      { label: 'Une pergola fleurie de glycines mauves au soleil', emoji: '🪻' },
+      { label: 'Un joli coussin brodé aux couleurs de la campagne', emoji: '🪡' },
+    ],
+    musique: [
+      { label: 'Les airs joyeux des bals populaires du 14 juillet', emoji: '🎆' },
+      { label: 'Les chansons douces fredonnées en préparant le dîner', emoji: '🎶' },
+      { label: 'Un clin d’œil malicieux sur les petites manies du quotidien', emoji: '😉' },
+      { label: 'Les grands classiques du théâtre et de la télévision d’antan', emoji: '🎭' },
+      { label: 'Une citation optimiste sur le bonheur à tout âge', emoji: '🌟' },
+      { label: 'L’amitié fidèle qui traverse toutes les saisons', emoji: '🤝' },
+    ],
+    cuisine: [
+      { label: 'Les marchés colorés du Sud-Ouest et leurs saveurs', emoji: '🧄' },
+      { label: 'Une balade nostalgique dans les rues de Paris en 1955', emoji: '🗼' },
+      { label: 'Une clafoutis aux cerises noires tiède et parfumé', emoji: '🍒' },
+      { label: 'Une rencontre chaleureuse avec Marcel Pagnol en Provence', emoji: '🌿' },
+      { label: 'Une machine à retrouver les lunettes en sifflant', emoji: '👓' },
+      { label: 'Un thé parfumé à la menthe fraîche sous la véranda', emoji: '🍵' },
+    ],
+  };
+
+  const pool = categoryExtras[workshop.categoryId] || categoryExtras.memoire;
+  const fresh = pool.filter((item) => !existingSet.has(item.label.toLowerCase().trim()));
+  const selected = fresh.slice(0, 4);
+
+  if (selected.length < 4) {
+    selected.push({
+      label: `Idée originale pour « ${workshop.title} » (étape ${stepIndex + 1})`,
+      emoji: workshop.emoji,
+    });
+  }
+
+  return selected.map((item, idx) => ({
+    id: `extra-${workshop.id}-${stepIndex}-${Date.now()}-${idx}`,
+    label: item.label,
+    emoji: item.emoji,
+  }));
+}
+
 export function generateLocalInteractiveFallback(
   workshop: WorkshopDefinition,
   selections: { step1: string; step2: string; step3: string },
@@ -421,6 +640,8 @@ export function generateLocalInteractiveFallback(
         choices: [
           'Quelle a été votre plus grande joie dans la vie ?',
           'Avez-vous une petite anecdote amusante à me confier ?',
+          'Quel lieu aimiez-vous par-dessus tout pour vous reposer ?',
+          'Que diriez-vous à un enfant curieux de tout aujourd’hui ?',
         ],
       };
     }
@@ -432,6 +653,8 @@ export function generateLocalInteractiveFallback(
       choices: [
         'Quel message aimeriez-vous laisser aux jeunes d’aujourd’hui ?',
         'Que faisiez-vous les dimanches pour vous reposer ?',
+        'Quelle personne vous a le plus inspiré(e) dans votre vie ?',
+        'Si nous commandions une petite douceur, que choisiriez-vous ?',
       ],
     };
   }
@@ -443,10 +666,12 @@ export function generateLocalInteractiveFallback(
   if (stepIndex === 0) {
     return {
       chapterTitle: `Chapitre 1 : Le grand départ — ${place}`,
-      content: `Une douce brise chargée de parfums printaniers vous accueille dès votre arrivée. Devant vous s'ouvre un décor magnifique : ${place.toLowerCase()}, accompagné de ${selections.step2.toLowerCase()}.\n\nEn prenant le temps de ${selections.step3.toLowerCase()}, vous remarquez deux chemins tout aussi charmants l'un que l'autre. D'un côté, une petite ruelle fleurie d'où s'échappe une douce musique ; de l'autre, un belvédère lumineux où un artisan local vous fait un signe amical de la main.`,
+      content: `Une douce brise chargée de parfums printaniers vous accueille dès votre arrivée. Devant vous s'ouvre un décor magnifique : ${place.toLowerCase()}, accompagné de ${selections.step2.toLowerCase()}.\n\nEn prenant le temps de ${selections.step3.toLowerCase()}, vous remarquez plusieurs chemins tout aussi charmants les uns que les autres : une petite ruelle fleurie d'où s'échappe une douce musique, un belvédère lumineux où un artisan vous fait signe, un marché coloré et un vieux jardin ombragé.`,
       choices: [
         'Suivre la petite ruelle fleurie en musique',
         'Rejoindre le belvédère et saluer l’artisan',
+        'Flâner au milieu des étals colorés du marché',
+        'Pousser la grille du vieux jardin ombragé',
       ],
     };
   }
@@ -454,10 +679,12 @@ export function generateLocalInteractiveFallback(
   return {
     chapterTitle: `Chapitre ${stepNum} : Une belle découverte`,
     choiceMade: userChoice,
-    content: `Excellent choix ! En décidant de « ${userChoice?.toLowerCase()} », vous découvrez un coin secret préservé du tumulte. La lumière dorée illumine les pierres anciennes et une table accueillante vous invite à faire une halte.\n\nOn vous y raconte une vieille légende locale pleine de charme tout en vous offrant une spécialité fraîchement préparée. Deux nouvelles possibilités s'offrent maintenant à votre curiosité :`,
+    content: `Excellent choix ! En décidant de « ${userChoice?.toLowerCase()} », vous découvrez un coin secret préservé du tumulte. La lumière dorée illumine les pierres anciennes et une table accueillante vous invite à faire une halte.\n\nOn vous y raconte une vieille légende locale pleine de charme tout en vous offrant une spécialité fraîchement préparée. Quatre nouvelles possibilités s'offrent maintenant à votre curiosité :`,
     choices: [
       'Visiter le jardin secret derrière la fontaine',
       'Écouter la suite de la légende autour d’un thé',
+      'Discuter avec le musicien installé sur le banc voisin',
+      'Emprunter le petit sentier qui mène au point de vue',
     ],
   };
 }
